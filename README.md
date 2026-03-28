@@ -23,7 +23,7 @@ GET /uploads/{uploadId}  ──► getUploadStatus Lambda ──► DynamoDB rec
 - **API Gateway (HTTP API)** + Lambda: `POST /uploads`, `GET /uploads/{uploadId}`
 - **S3** bucket with `ObjectCreated` notifications → **SQS** → `processUpload` Lambda
 - **DynamoDB** (on-demand) for upload records
-- **IAM**: least-privilege role per function via [`serverless-iam-roles-per-function`](https://github.com/functionalone/serverless-iam-roles-per-function)
+- **IAM**: least-privilege role per function
 
 ## Prerequisites
 
@@ -168,16 +168,15 @@ sls remove
 
 ## Project layout
 
-| File                     | Purpose                                         |
-| ------------------------ | ----------------------------------------------- |
-| `serverless.yml`         | All infrastructure + Lambda definitions         |
+| File                     | Purpose                                                          |
+| ------------------------ | ---------------------------------------------------------------- |
+| `serverless.yml`         | All infrastructure + Lambda definitions                          |
 | `src/createUpload.js`    | `POST /uploads` — issues pre-signed URL, writes `PENDING` record |
-| `src/getUploadStatus.js` | `GET /uploads/{uploadId}` — reads DynamoDB record |
-| `src/processUpload.js`   | SQS consumer — calls `HeadObject`, writes `DONE` + metadata |
+| `src/getUploadStatus.js` | `GET /uploads/{uploadId}` — reads DynamoDB record                |
+| `src/processUpload.js`   | SQS consumer — calls `HeadObject`, writes `DONE` + metadata      |
 
 ## Notes
 
-- **Bundling**: uses `serverless-esbuild`; `@aws-sdk/*` packages are marked external so the Lambda Node.js 20 runtime supplies AWS SDK v3 — no SDK code is included in the deployment zip.
 - **ESM**: `package.json` sets `"type": "module"` so all source files use ES module syntax (`import`/`export`).
 - **Visibility timeout**: the SQS queue has a 60-second visibility timeout, giving the `processUpload` Lambda enough time to finish before a message becomes re-visible.
 - **Idempotency**: S3 → SQS notifications can occasionally deliver a message more than once; the `UpdateItem` call is safe to repeat since it overwrites the same fields.

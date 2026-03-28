@@ -1,5 +1,5 @@
-import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 
 const UPLOAD_PREFIX = 'uploads/'
@@ -14,18 +14,27 @@ function decodeS3Key(key) {
 /** S3 → SQS sends a JSON body with a top-level Records[] of S3 events. */
 function jobsFromSqsBody(body) {
   const jobs = []
+
   if (body?.Records?.length) {
     for (const r of body.Records) {
       const rawKey = r.s3?.object?.key
+
       if (!rawKey) continue
+
       const s3Key = decodeS3Key(rawKey)
+
       if (!s3Key.startsWith(UPLOAD_PREFIX)) continue
+
       const uploadId = s3Key.slice(UPLOAD_PREFIX.length)
+
       if (!uploadId) continue
+
       jobs.push({ uploadId, s3Key })
     }
+
     return jobs
   }
+
   if (body?.uploadId && body?.s3Key) {
     jobs.push({ uploadId: body.uploadId, s3Key: body.s3Key })
   }
@@ -46,12 +55,13 @@ export const handler = async (event) => {
       console.log('SQS record', {
         messageId: record.messageId,
         bodyLength: record.body?.length,
-        bodyPreview: record.body?.slice(0, 500),
       })
 
       const body = JSON.parse(record.body)
       const jobs = jobsFromSqsBody(body)
+
       console.log('parsed jobs', { count: jobs.length, jobs })
+
       if (jobs.length === 0) {
         console.warn('no upload jobs in message; check S3 event shape', {
           messageId: record.messageId,
@@ -65,10 +75,11 @@ export const handler = async (event) => {
             Key: s3Key,
           }),
         )
+
         console.log('HeadObject ok', {
           uploadId,
-          contentLength: head.ContentLength,
           contentType: head.ContentType,
+          contentLength: head.ContentLength,
         })
 
         await ddb.send(
@@ -91,10 +102,11 @@ export const handler = async (event) => {
       }
     } catch (err) {
       console.error('processUpload record failed', {
-        messageId: record.messageId,
         name: err.name,
         message: err.message,
+        messageId: record.messageId,
       })
+
       throw err
     }
   }

@@ -1,0 +1,105 @@
+service: image-upload-api
+frameworkVersion: '4'
+stage: 'dev'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: eu-central-1
+  environment:
+    BUCKET_NAME: !Ref UploadsBucket
+    TABLE_NAME: !Ref UploadsTable
+    QUEUE_URL: !Ref UploadQueue
+
+functions:
+  createUpload:
+    handler: src/createUpload.handler
+    events:
+      - httpApi:
+          path: /uploads
+          method: POST
+    iamRoleStatements:
+      - Effect: Allow
+        Action: [s3:PutObject]
+        Resource: !Sub 'arn:aws:s3:::${UploadsBucket}/*'
+      - Effect: Allow
+        Action: [dynamodb:PutItem]
+        Resource: !GetAtt UploadsTable.Arn
+
+  getUploadStatus:
+    handler: src/getUploadStatus.handler
+    events:
+      - httpApi:
+          path: /uploads/{uploadId}
+          method: GET
+    iamRoleStatements:
+      - Effect: Allow
+        Action: [dynamodb:GetItem]
+        Resource: !GetAtt UploadsTable.Arn
+
+  processUpload:
+    handler: src/processUpload.handler
+    events:
+      - sqs:
+          arn: !GetAtt UploadQueue.Arn
+          batchSize: 1
+    iamRoleStatements:
+      - Effect: Allow
+        Action: [s3:GetObject, s3:HeadObject]
+        Resource: !Sub 'arn:aws:s3:::${UploadsBucket}/*'
+      - Effect: Allow
+        Action: [dynamodb:UpdateItem]
+        Resource: !GetAtt UploadsTable.Arn
+      - Effect: Allow
+        Action: [sqs:DeleteMessage, sqs:ReceiveMessage, sqs:GetQueueAttributes]
+        Resource: !GetAtt UploadQueue.Arn
+
+resources:
+  Resources:
+    UploadsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: uploadId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: uploadId
+            KeyType: HASH
+
+    UploadsBucket:
+      Type: AWS::S3::Bucket
+      DependsOn:
+        - QueuePolicy
+      Properties:
+        NotificationConfiguration:
+          QueueConfigurations:
+            - Event: s3:ObjectCreated:*
+              Filter:
+                S3Key:
+                  Rules:
+                    - Name: prefix
+                      Value: uploads/
+              Queue: !GetAtt UploadQueue.Arn
+
+    UploadQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        VisibilityTimeout: 60
+
+    QueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues: [!Ref UploadQueue]
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Sid: AllowS3ToSendMessage
+              Effect: Allow
+              Principal:
+                Service: s3.amazonaws.com
+              Action: sqs:SendMessage
+              Resource: !GetAtt UploadQueue.Arn
+              Condition:
+                StringEquals:
+                  aws:SourceAccount: !Ref AWS::AccountId
